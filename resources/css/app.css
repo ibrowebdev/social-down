@@ -1,0 +1,148 @@
+@import "tailwindcss";
+@import "../../vendor/livewire/flux/dist/flux.css";
+
+@source '../views';
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
+@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    --font-sans:
+        "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+        "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+    --color-zinc-50: #fafafa;
+    --color-zinc-100: #f5f5f5;
+    --color-zinc-200: #e5e5e5;
+    --color-zinc-300: #d4d4d4;
+    --color-zinc-400: #a3a3a3;
+    --color-zinc-500: #737373;
+    --color-zinc-600: #525252;
+    --color-zinc-700: #404040;
+    --color-zinc-800: #262626;
+    --color-zinc-900: #171717;
+    --color-zinc-950: #0a0a0a;
+
+    --color-accent: var(--color-blue-600);
+    --color-accent-content: var(--color-blue-600);
+    --color-accent-foreground: var(--color-white);
+
+    --animate-float-slow: float-slow 8s ease-in-out infinite;
+    --animate-float-slower: float-slower 12s ease-in-out infinite;
+    --animate-fade-in-up: fade-in-up 0.6s ease-out forwards;
+    --animate-progress-bar: progress-bar 2s ease-in-out infinite;
+    --animate-ping-slow: ping-slow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@layer theme {
+    .dark {
+        --color-accent: var(--color-blue-500);
+        --color-accent-content: var(--color-blue-500);
+        --color-accent-foreground: var(--color-white);
+    }
+}
+
+@layer base {
+    *,
+    ::after,
+    ::before,
+    ::backdrop,
+    ::file-selector-button {
+        border-color: var(--color-gray-200, currentColor);
+    }
+}
+
+[data-flux-field]:not(ui-radio, ui-checkbox) {
+    @apply grid gap-2;
+}
+
+[data-flux-label] {
+    @apply !mb-0 !leading-tight;
+}
+
+input:focus[data-flux-control],
+textarea:focus[data-flux-control],
+select:focus[data-flux-control] {
+    @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
+}
+
+/* Custom Keyframes */
+@keyframes float-slow {
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+    }
+    33% {
+        transform: translate(30px, -30px) scale(1.05);
+    }
+    66% {
+        transform: translate(-20px, 20px) scale(0.95);
+    }
+}
+
+@keyframes float-slower {
+    0%,
+    100% {
+        transform: translate(0, 0) scale(1);
+    }
+    33% {
+        transform: translate(-40px, 30px) scale(1.08);
+    }
+    66% {
+        transform: translate(30px, -40px) scale(0.92);
+    }
+}
+
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes progress-bar {
+    0% {
+        width: 5%;
+        margin-left: 0;
+    }
+    50% {
+        width: 60%;
+        margin-left: 20%;
+    }
+    100% {
+        width: 5%;
+        margin-left: 95%;
+    }
+}
+
+@keyframes ping-slow {
+    75%,
+    100% {
+        transform: scale(1.5);
+        opacity: 0;
+    }
+}
+
+/* Animation delays */
+.animation-delay-100 {
+    animation-delay: 0.1s;
+    opacity: 0;
+}
+.animation-delay-200 {
+    animation-delay: 0.2s;
+    opacity: 0;
+}
+.animation-delay-300 {
+    animation-delay: 0.3s;
+    opacity: 0;
+}
+.animation-delay-400 {
+    animation-delay: 0.4s;
+    opacity: 0;
+}
