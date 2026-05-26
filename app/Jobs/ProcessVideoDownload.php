@@ -54,6 +54,7 @@ class ProcessVideoDownload implements ShouldQueue
 
         $command = [
             $ytdlpBinary,
+            '--js-runtimes', 'nodejs,deno',
             '-f',
             $format,
         ];

@@ -41,6 +41,7 @@ class FetchVideoMetadata implements ShouldQueue
         // Command: yt-dlp -j --no-playlist <URL>
         $command = [
             $ytdlpBinary,
+            '--js-runtimes', 'nodejs,deno',
             '-j',
             '--no-playlist',
             '--playlist-items', '1',
