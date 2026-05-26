@@ -47,6 +47,6 @@ return [
         'cookies_browser' => env('YTDLP_COOKIES_BROWSER'),
         'cookies_file' => strtoupper(substr(PHP_OS, 0, 3)) === 'WIN'
             ? env('YTDLP_COOKIES_FILE')   // Local Windows absolute path
-            : (is_file(base_path('cookies.txt')) ? base_path('cookies.txt') : null), // Cloud looks for cookies.txt at root
+            : base_path('cookies.txt'),    // Cloud uses cookies.txt committed at project root
     ],
 ];
