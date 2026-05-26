@@ -36,10 +36,17 @@ return [
     ],
 
     'ytdlp' => [
-        'binary' => env('YTDLP_PATH', 'yt-dlp'),
-        'ffmpeg_dir' => env('FFMPEG_DIR'),
-        'cookies_browser' => env('YTDLP_COOKIES_BROWSER'),
-        'cookies_file' => env('YTDLP_COOKIES_FILE'),
-    ],
+        'binary' => strtoupper(substr(PHP_OS, 0, 3)) === 'WIN'
+            ? env('YTDLP_PATH', 'yt-dlp') // Local Windows uses your WinGet path from .env
+            : base_path('bin/yt-dlp'),    // Live Laravel Cloud automatically uses the bundled Linux binary
 
+        'ffmpeg_dir' => strtoupper(substr(PHP_OS, 0, 3)) === 'WIN'
+            ? env('FFMPEG_DIR')           // Local Windows uses your local FFmpeg directory
+            : null,                       // On Laravel Cloud, FFmpeg is typically global (or handled via buildpacks)
+
+        'cookies_browser' => env('YTDLP_COOKIES_BROWSER'),
+        'cookies_file' => strtoupper(substr(PHP_OS, 0, 3)) === 'WIN'
+            ? env('YTDLP_COOKIES_FILE')   // Local Windows absolute path
+            : (is_file(base_path('cookies.txt')) ? base_path('cookies.txt') : null), // Cloud looks for cookies.txt at root
+    ],
 ];
