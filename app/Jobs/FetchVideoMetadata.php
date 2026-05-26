@@ -39,14 +39,22 @@ class FetchVideoMetadata implements ShouldQueue
         $cookiesFile = config('services.ytdlp.cookies_file');
         $cookiesBrowser = config('services.ytdlp.cookies_browser');
 
+        // Detect the Node.js binary path for --js-runtimes
+        $jsRuntimes = $this->detectJsRuntimes();
+
         // Command: yt-dlp -j --no-playlist <URL>
         $command = [
             $ytdlpBinary,
-            '--js-runtimes', 'node,deno',
             '-j',
             '--no-playlist',
             '--playlist-items', '1',
         ];
+
+        // Add JS runtimes if any were detected
+        if ($jsRuntimes) {
+            $command[] = '--js-runtimes';
+            $command[] = $jsRuntimes;
+        }
 
         // Static cookies.txt file
         if ($cookiesFile && is_file($cookiesFile)) {
@@ -60,6 +68,15 @@ class FetchVideoMetadata implements ShouldQueue
         }
 
         $command[] = $videoDownload->original_url;
+
+        // Diagnostic logging for debugging Cloud environment
+        Log::info('yt-dlp metadata command', [
+            'id' => $videoDownload->id,
+            'command' => implode(' ', $command),
+            'cookies_file_config' => $cookiesFile,
+            'cookies_file_exists' => $cookiesFile ? is_file($cookiesFile) : false,
+            'js_runtimes' => $jsRuntimes,
+        ]);
 
         $process = new Process($command);
         $process->setTimeout(150);
@@ -253,6 +270,76 @@ class FetchVideoMetadata implements ShouldQueue
         $pow = min($pow, count($units) - 1);
         $bytes /= pow(1024, $pow);
         return round($bytes, $precision) . ' ' . $units[$pow];
+    }
+
+    /**
+     * Detect available JavaScript runtimes and return a --js-runtimes value.
+     * On Cloud servers, node/deno may not be on the queue worker's PATH,
+     * so we check common locations and provide explicit paths.
+     */
+    protected function detectJsRuntimes(): ?string
+    {
+        $runtimes = [];
+
+        // Common paths where Node.js might be installed
+        $nodePaths = [
+            '/usr/local/bin/node',
+            '/usr/bin/node',
+            '/usr/local/nodejs/bin/node',
+            '/opt/node/bin/node',
+        ];
+
+        foreach ($nodePaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "node:{$path}";
+                break;
+            }
+        }
+
+        // Try `which node` as a last resort
+        if (empty($runtimes)) {
+            $which = trim((string) shell_exec('which node 2>/dev/null'));
+            if ($which && is_executable($which)) {
+                $runtimes[] = "node:{$which}";
+            }
+        }
+
+        // Check for Deno
+        $denoPaths = [
+            '/usr/local/bin/deno',
+            '/usr/bin/deno',
+        ];
+
+        foreach ($denoPaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "deno:{$path}";
+                break;
+            }
+        }
+
+        // Check for Bun
+        $bunPaths = [
+            '/usr/local/bin/bun',
+            '/usr/bin/bun',
+        ];
+
+        foreach ($bunPaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "bun:{$path}";
+                break;
+            }
+        }
+
+        if (empty($runtimes)) {
+            Log::warning('No JavaScript runtime found for yt-dlp', [
+                'PATH' => getenv('PATH'),
+            ]);
+            return null;
+        }
+
+        Log::info('Detected JS runtimes for yt-dlp', ['runtimes' => $runtimes]);
+
+        return implode(',', $runtimes);
     }
 
     /**

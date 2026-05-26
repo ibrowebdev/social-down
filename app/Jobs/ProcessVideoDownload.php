@@ -52,13 +52,20 @@ class ProcessVideoDownload implements ShouldQueue
         $format = $videoDownload->selected_format ?? 'bestvideo+bestaudio/best';
         $quality = strtolower($videoDownload->selected_quality ?? '');
         $isAudio = str_contains($quality, 'audio') || str_contains($quality, 'mp3') || str_contains($quality, 'm4a');
+        // Detect the Node.js binary path for --js-runtimes
+        $jsRuntimes = $this->detectJsRuntimes();
 
         $command = [
             $ytdlpBinary,
-            '--js-runtimes', 'node,deno',
             '-f',
             $format,
         ];
+
+        // Add JS runtimes if any were detected
+        if ($jsRuntimes) {
+            $command[] = '--js-runtimes';
+            $command[] = $jsRuntimes;
+        }
 
         if ($isAudio) {
             $audioFormat = str_contains($quality, 'm4a') ? 'm4a' : 'mp3';
@@ -153,5 +160,52 @@ class ProcessVideoDownload implements ShouldQueue
                 'error_message' => ErrorSanitizer::forUser($exception?->getMessage() ?? ''),
             ]);
         }
+    }
+
+    /**
+     * Detect available JavaScript runtimes and return a --js-runtimes value.
+     */
+    protected function detectJsRuntimes(): ?string
+    {
+        $runtimes = [];
+
+        $nodePaths = [
+            '/usr/local/bin/node',
+            '/usr/bin/node',
+            '/usr/local/nodejs/bin/node',
+            '/opt/node/bin/node',
+        ];
+
+        foreach ($nodePaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "node:{$path}";
+                break;
+            }
+        }
+
+        if (empty($runtimes)) {
+            $which = trim((string) shell_exec('which node 2>/dev/null'));
+            if ($which && is_executable($which)) {
+                $runtimes[] = "node:{$which}";
+            }
+        }
+
+        $denoPaths = ['/usr/local/bin/deno', '/usr/bin/deno'];
+        foreach ($denoPaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "deno:{$path}";
+                break;
+            }
+        }
+
+        $bunPaths = ['/usr/local/bin/bun', '/usr/bin/bun'];
+        foreach ($bunPaths as $path) {
+            if (is_file($path) && is_executable($path)) {
+                $runtimes[] = "bun:{$path}";
+                break;
+            }
+        }
+
+        return empty($runtimes) ? null : implode(',', $runtimes);
     }
 }
