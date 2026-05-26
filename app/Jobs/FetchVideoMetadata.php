@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Helpers\ErrorSanitizer;
 use App\Models\VideoDownload;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -115,7 +116,7 @@ class FetchVideoMetadata implements ShouldQueue
         } catch (\Exception $e) {
             $videoDownload->update([
                 'status' => 'failed',
-                'error_message' => mb_substr($e->getMessage(), 0, 500),
+                'error_message' => ErrorSanitizer::forUser($e->getMessage()),
             ]);
 
             Log::error('Failed to fetch video metadata', [
@@ -264,7 +265,7 @@ class FetchVideoMetadata implements ShouldQueue
         if ($videoDownload) {
             $videoDownload->update([
                 'status' => 'failed',
-                'error_message' => $exception?->getMessage() ?? 'Failed to fetch video metadata.',
+                'error_message' => ErrorSanitizer::forUser($exception?->getMessage() ?? ''),
             ]);
         }
     }

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Helpers\ErrorSanitizer;
 use App\Models\VideoDownload;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -118,7 +119,7 @@ class ProcessVideoDownload implements ShouldQueue
 
                 $videoDownload->update([
                     'status' => 'failed',
-                    'error_message' => mb_substr($errorOutput, 0, 500),
+                    'error_message' => ErrorSanitizer::forUser($errorOutput),
                 ]);
 
                 Log::error('Video download failed', [
@@ -129,7 +130,7 @@ class ProcessVideoDownload implements ShouldQueue
         } catch (\Exception $e) {
             $videoDownload->update([
                 'status' => 'failed',
-                'error_message' => $e->getMessage(),
+                'error_message' => ErrorSanitizer::forUser($e->getMessage()),
             ]);
 
             Log::error('Video download exception', [
@@ -149,7 +150,7 @@ class ProcessVideoDownload implements ShouldQueue
         if ($videoDownload) {
             $videoDownload->update([
                 'status' => 'failed',
-                'error_message' => $exception?->getMessage() ?? 'Unknown error occurred.',
+                'error_message' => ErrorSanitizer::forUser($exception?->getMessage() ?? ''),
             ]);
         }
     }
