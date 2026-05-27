@@ -5,11 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\VideoDownload;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DownloadController extends Controller
 {
-    public function serveFile(string $id): BinaryFileResponse
+    public function serveFile(string $id): StreamedResponse
     {
         $videoDownload = VideoDownload::findOrFail($id);
 
@@ -22,36 +22,19 @@ class DownloadController extends Controller
             abort(404, 'File is not ready for download.');
         }
 
-        $disk = Storage::disk('local');
+        $disk = Storage::disk(config('filesystems.default'));
         $fullPath = $videoDownload->file_path;
 
         // If the stored path doesn't exist, try finding the file with any extension
         if (!$disk->exists($fullPath)) {
-            $baseName = pathinfo($fullPath, PATHINFO_FILENAME);
-            $dir = pathinfo($fullPath, PATHINFO_DIRNAME);
-            $searchPattern = storage_path('app/private/' . $dir . '/' . $baseName . '.*');
-            $matches = glob($searchPattern);
-
-            if (!empty($matches)) {
-                $actualExt = pathinfo($matches[0], PATHINFO_EXTENSION);
-                $fullPath = $dir . '/' . $baseName . '.' . $actualExt;
-
-                // Update the record with the correct path for future requests
-                $videoDownload->update(['file_path' => $fullPath]);
-
-                Log::info('Download file found with different extension', [
-                    'id' => $id,
-                    'original_path' => $videoDownload->getOriginal('file_path'),
-                    'corrected_path' => $fullPath,
-                ]);
-            } else {
-                Log::error('Download file not found on disk', [
-                    'id' => $id,
-                    'file_path' => $fullPath,
-                    'search_pattern' => $searchPattern,
-                ]);
-                abort(404, 'File not found on disk.');
-            }
+            // For local disks we can glob, for S3 we would list objects, but usually 
+            // if we just uploaded it with the correct extension, this branch shouldn't hit.
+            Log::error('Download file not found on disk', [
+                'id' => $id,
+                'file_path' => $fullPath,
+                'disk' => config('filesystems.default'),
+            ]);
+            abort(404, 'File not found on disk.');
         }
 
         $ext = pathinfo($fullPath, PATHINFO_EXTENSION) ?: 'mp4';
@@ -71,9 +54,7 @@ class DownloadController extends Controller
         $slug = \Illuminate\Support\Str::slug($videoDownload->title ?: 'video');
         $filename = ($slug ?: 'video') . '-' . substr($videoDownload->id, 0, 8) . '.' . $ext;
 
-        $absolutePath = storage_path('app/private/' . $fullPath);
-
-        return response()->download($absolutePath, $filename, [
+        return $disk->download($fullPath, $filename, [
             'Content-Type' => $contentType,
         ]);
     }

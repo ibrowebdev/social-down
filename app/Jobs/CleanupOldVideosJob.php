@@ -30,8 +30,9 @@ class CleanupOldVideosJob implements ShouldQueue
             // Delete the physical file if it exists
             if ($download->file_path) {
                 $fullPath = $download->file_path;
-                if (Storage::disk('local')->exists($fullPath)) {
-                    Storage::disk('local')->delete($fullPath);
+                $disk = Storage::disk(config('filesystems.default'));
+                if ($disk->exists($fullPath)) {
+                    $disk->delete($fullPath);
                 }
             }
 

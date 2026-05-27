@@ -7,6 +7,7 @@ use App\Models\VideoDownload;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\Process\Process;
 
 class ProcessVideoDownload implements ShouldQueue
@@ -120,6 +121,13 @@ class ProcessVideoDownload implements ShouldQueue
                 $actualFile = $actualFiles[0];
                 $actualExt = pathinfo($actualFile, PATHINFO_EXTENSION);
                 $filePath = 'downloads/' . $videoDownload->id . '.' . $actualExt;
+
+                // Move the file from ephemeral container storage to the persistent cloud storage
+                $disk = Storage::disk(config('filesystems.default'));
+                $disk->put($filePath, fopen($actualFile, 'r+'));
+                
+                // Clean up the local ephemeral file to save container disk space
+                unlink($actualFile);
 
                 $videoDownload->update([
                     'status'    => 'completed',
