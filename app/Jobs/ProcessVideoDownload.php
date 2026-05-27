@@ -109,8 +109,17 @@ class ProcessVideoDownload implements ShouldQueue
 
         try {
             if ($process->isSuccessful()) {
-                $ext = $isAudio ? (str_contains($quality, 'm4a') ? 'm4a' : 'mp3') : 'mp4';
-                $filePath = 'downloads/' . $videoDownload->id . '.' . $ext;
+                // Find the actual file yt-dlp created (extension may differ from expected)
+                $actualFiles = glob($outputDir . DIRECTORY_SEPARATOR . $videoDownload->id . '.*');
+
+                if (empty($actualFiles)) {
+                    throw new \RuntimeException('yt-dlp reported success but no output file was found.');
+                }
+
+                // Use the first matching file (there should only be one)
+                $actualFile = $actualFiles[0];
+                $actualExt = pathinfo($actualFile, PATHINFO_EXTENSION);
+                $filePath = 'downloads/' . $videoDownload->id . '.' . $actualExt;
 
                 $videoDownload->update([
                     'status'    => 'completed',
