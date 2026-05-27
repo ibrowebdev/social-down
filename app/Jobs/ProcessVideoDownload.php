@@ -1,3 +1,5 @@
+// ProcessVideoDownload.php
+
 <?php
 
 namespace App\Jobs;
@@ -13,31 +15,19 @@ class ProcessVideoDownload implements ShouldQueue
 {
     use Queueable;
 
-    /**
-     * The number of seconds the job can run before timing out.
-     */
     public int $timeout = 660;
 
-    /**
-     * Create a new job instance.
-     */
     public function __construct(
         public string $videoDownloadId
-    ) {
-    }
+    ) {}
 
-    /**
-     * Execute the job.
-     */
     public function handle(): void
     {
         $videoDownload = VideoDownload::findOrFail($this->videoDownloadId);
-
         $videoDownload->update(['status' => 'processing']);
 
         $outputDir = storage_path('app/private/downloads');
 
-        // Ensure the downloads directory exists
         if (!is_dir($outputDir)) {
             mkdir($outputDir, 0755, true);
         }
@@ -52,16 +42,14 @@ class ProcessVideoDownload implements ShouldQueue
         $format = $videoDownload->selected_format ?? 'bestvideo+bestaudio/best';
         $quality = strtolower($videoDownload->selected_quality ?? '');
         $isAudio = str_contains($quality, 'audio') || str_contains($quality, 'mp3') || str_contains($quality, 'm4a');
-        // Detect the Node.js binary path for --js-runtimes
+
         $jsRuntimes = $this->detectJsRuntimes();
 
         $command = [
             $ytdlpBinary,
-            '-f',
-            $format,
+            '-f', $format,
         ];
 
-        // Add JS runtimes if any were detected
         if ($jsRuntimes) {
             $command[] = '--js-runtimes';
             $command[] = $jsRuntimes;
@@ -82,89 +70,97 @@ class ProcessVideoDownload implements ShouldQueue
         $command[] = '--no-playlist';
         $command[] = '--no-overwrites';
 
-        // Point yt-dlp to ffmpeg if a custom path is configured
         if ($ffmpegDir) {
             $command[] = '--ffmpeg-location';
             $command[] = $ffmpegDir;
         }
 
-        // Use a static cookies.txt file if configured (most reliable)
         if ($cookiesFile && is_file($cookiesFile)) {
             $command[] = '--cookies';
             $command[] = $cookiesFile;
-        }
-        // Fallback to local browser cookies (can fail if Chrome/Edge locks its DB while open)
-        elseif ($cookiesBrowser) {
+        } elseif ($cookiesBrowser) {
             $command[] = '--cookies-from-browser';
             $command[] = $cookiesBrowser;
         }
 
-        $command[] = $videoDownload->original_url;
+        // ✅ FIX 1: User-Agent
+        $command[] = '--user-agent';
+        $command[] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+        $command[] = '--add-header';
+        $command[] = 'Accept-Language:en-US,en;q=0.9';
 
-        $process = new Process($command);
+        // ✅ FIX 2: Client fallback loop
+        $strategies = [
+            ['--extractor-args', 'youtube:player_client=web'],
+            ['--extractor-args', 'youtube:player_client=android'],
+            ['--extractor-args', 'youtube:player_client=ios'],
+        ];
 
-        $process->setTimeout(600);
+        $process = null;
 
-        try {
+        foreach ($strategies as $strategy) {
+            $fullCommand = array_merge($command, $strategy, [$videoDownload->original_url]);
+            $process = new Process($fullCommand);
+            $process->setTimeout(600);
             $process->run();
 
+            if ($process->isSuccessful()) {
+                break;
+            }
+        }
+
+        try {
             if ($process->isSuccessful()) {
                 $ext = $isAudio ? (str_contains($quality, 'm4a') ? 'm4a' : 'mp3') : 'mp4';
                 $filePath = 'downloads/' . $videoDownload->id . '.' . $ext;
 
                 $videoDownload->update([
-                    'status' => 'completed',
+                    'status'    => 'completed',
                     'file_path' => $filePath,
                 ]);
 
                 Log::info('Media download completed', [
-                    'id' => $videoDownload->id,
+                    'id'   => $videoDownload->id,
                     'path' => $filePath,
                 ]);
             } else {
                 $errorOutput = $process->getErrorOutput() ?: $process->getOutput();
 
                 $videoDownload->update([
-                    'status' => 'failed',
+                    'status'        => 'failed',
                     'error_message' => ErrorSanitizer::forUser($errorOutput),
                 ]);
 
                 Log::error('Video download failed', [
-                    'id' => $videoDownload->id,
+                    'id'    => $videoDownload->id,
                     'error' => $errorOutput,
                 ]);
             }
         } catch (\Exception $e) {
             $videoDownload->update([
-                'status' => 'failed',
+                'status'        => 'failed',
                 'error_message' => ErrorSanitizer::forUser($e->getMessage()),
             ]);
 
             Log::error('Video download exception', [
-                'id' => $videoDownload->id,
+                'id'    => $videoDownload->id,
                 'error' => $e->getMessage(),
             ]);
         }
     }
 
-    /**
-     * Handle a job failure.
-     */
     public function failed(?\Throwable $exception): void
     {
         $videoDownload = VideoDownload::find($this->videoDownloadId);
 
         if ($videoDownload) {
             $videoDownload->update([
-                'status' => 'failed',
+                'status'        => 'failed',
                 'error_message' => ErrorSanitizer::forUser($exception?->getMessage() ?? ''),
             ]);
         }
     }
 
-    /**
-     * Detect available JavaScript runtimes and return a --js-runtimes value.
-     */
     protected function detectJsRuntimes(): ?string
     {
         $runtimes = [];
@@ -190,16 +186,14 @@ class ProcessVideoDownload implements ShouldQueue
             }
         }
 
-        $denoPaths = ['/usr/local/bin/deno', '/usr/bin/deno'];
-        foreach ($denoPaths as $path) {
+        foreach (['/usr/local/bin/deno', '/usr/bin/deno'] as $path) {
             if (is_file($path) && is_executable($path)) {
                 $runtimes[] = "deno:{$path}";
                 break;
             }
         }
 
-        $bunPaths = ['/usr/local/bin/bun', '/usr/bin/bun'];
-        foreach ($bunPaths as $path) {
+        foreach (['/usr/local/bin/bun', '/usr/bin/bun'] as $path) {
             if (is_file($path) && is_executable($path)) {
                 $runtimes[] = "bun:{$path}";
                 break;

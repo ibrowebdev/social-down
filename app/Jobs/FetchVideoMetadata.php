@@ -1,5 +1,6 @@
-<?php
+// FetchVideoMetadata.php
 
+<?php
 namespace App\Jobs;
 
 use App\Helpers\ErrorSanitizer;
@@ -13,36 +14,23 @@ class FetchVideoMetadata implements ShouldQueue
 {
     use Queueable;
 
-    /**
-     * The number of seconds the job can run before timing out.
-     */
     public int $timeout = 180;
 
-    /**
-     * Create a new job instance.
-     */
     public function __construct(
         public string $videoDownloadId
-    ) {
-    }
+    ) {}
 
-    /**
-     * Execute the job.
-     */
     public function handle(): void
     {
         $videoDownload = VideoDownload::findOrFail($this->videoDownloadId);
-
         $videoDownload->update(['status' => 'fetching_metadata']);
 
         $ytdlpBinary = config('services.ytdlp.binary', 'yt-dlp');
         $cookiesFile = config('services.ytdlp.cookies_file');
         $cookiesBrowser = config('services.ytdlp.cookies_browser');
 
-        // Detect the Node.js binary path for --js-runtimes
         $jsRuntimes = $this->detectJsRuntimes();
 
-        // Command: yt-dlp -j --no-playlist <URL>
         $command = [
             $ytdlpBinary,
             '-j',
@@ -50,40 +38,46 @@ class FetchVideoMetadata implements ShouldQueue
             '--playlist-items', '1',
         ];
 
-        // Add JS runtimes if any were detected
         if ($jsRuntimes) {
             $command[] = '--js-runtimes';
             $command[] = $jsRuntimes;
         }
 
-        // Static cookies.txt file
         if ($cookiesFile && is_file($cookiesFile)) {
             $command[] = '--cookies';
             $command[] = $cookiesFile;
-        }
-        // Fallback to local browser cookies
-        elseif ($cookiesBrowser) {
+        } elseif ($cookiesBrowser) {
             $command[] = '--cookies-from-browser';
             $command[] = $cookiesBrowser;
         }
 
-        $command[] = $videoDownload->original_url;
+        // ✅ FIX 1: User-Agent
+        $command[] = '--user-agent';
+        $command[] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+        $command[] = '--add-header';
+        $command[] = 'Accept-Language:en-US,en;q=0.9';
 
-        // Diagnostic logging for debugging Cloud environment
-        Log::info('yt-dlp metadata command', [
-            'id' => $videoDownload->id,
-            'command' => implode(' ', $command),
-            'cookies_file_config' => $cookiesFile,
-            'cookies_file_exists' => $cookiesFile ? is_file($cookiesFile) : false,
-            'js_runtimes' => $jsRuntimes,
-        ]);
+        // ✅ FIX 2: Client fallback loop
+        $strategies = [
+            ['--extractor-args', 'youtube:player_client=web'],
+            ['--extractor-args', 'youtube:player_client=android'],
+            ['--extractor-args', 'youtube:player_client=ios'],
+        ];
 
-        $process = new Process($command);
-        $process->setTimeout(150);
+        $process = null;
 
-        try {
+        foreach ($strategies as $strategy) {
+            $fullCommand = array_merge($command, $strategy, [$videoDownload->original_url]);
+            $process = new Process($fullCommand);
+            $process->setTimeout(150);
             $process->run();
 
+            if ($process->isSuccessful()) {
+                break;
+            }
+        }
+
+        try {
             if (!$process->isSuccessful()) {
                 $errorOutput = $process->getErrorOutput() ?: $process->getOutput();
                 throw new \RuntimeException($errorOutput ?: 'yt-dlp process failed with no output.');
@@ -96,14 +90,11 @@ class FetchVideoMetadata implements ShouldQueue
                 throw new \RuntimeException('Failed to parse metadata JSON output: ' . json_last_error_msg());
             }
 
-            // Extract fields
             $title = $metadata['title'] ?? $metadata['fulltitle'] ?? 'Social Video';
             $thumbnail = $metadata['thumbnail'] ?? null;
-            
-            // Fallback for thumbnail if not directly present in thumbnail key but exists in thumbnails array
+
             if (!$thumbnail && !empty($metadata['thumbnails'])) {
                 $thumbnails = $metadata['thumbnails'];
-                // Get the last thumbnail (usually highest resolution)
                 $lastThumb = end($thumbnails);
                 $thumbnail = $lastThumb['url'] ?? null;
             }
@@ -112,7 +103,6 @@ class FetchVideoMetadata implements ShouldQueue
             $uploader = $metadata['uploader'] ?? $metadata['channel'] ?? 'Unknown Creator';
             $rawFormats = $metadata['formats'] ?? [];
 
-            // Parse and format options
             $compiledFormats = $this->compileFormatOptions($rawFormats);
 
             $videoDownload->update([
@@ -143,15 +133,11 @@ class FetchVideoMetadata implements ShouldQueue
         }
     }
 
-    /**
-     * Compile video resolutions and audio options into a clean, pretty structure.
-     */
     protected function compileFormatOptions(array $formats): array
     {
         $compiled = [];
         $heights = [];
 
-        // Find the best audio stream size to estimate total combined file size
         $bestAudioSize = 0;
         foreach ($formats as $f) {
             if (($f['vcodec'] ?? 'none') === 'none' && ($f['acodec'] ?? 'none') !== 'none') {
@@ -162,7 +148,6 @@ class FetchVideoMetadata implements ShouldQueue
             }
         }
 
-        // Extract and sort video resolutions (heights)
         foreach ($formats as $f) {
             $height = $f['height'] ?? null;
             $vcodec = $f['vcodec'] ?? 'none';
@@ -174,28 +159,25 @@ class FetchVideoMetadata implements ShouldQueue
         $heights = array_values(array_unique($heights));
         rsort($heights);
 
-        // Standard labels for resolutions
         $supportedQualities = [
             4320 => '8K Ultra HD (4320p)',
             2160 => '4K Ultra HD (2160p)',
             1440 => '2K (1440p)',
             1080 => 'Full HD (1080p)',
-            720 => 'HD (720p)',
-            480 => '480p',
-            360 => '360p',
-            240 => '240p',
-            144 => '144p',
+            720  => 'HD (720p)',
+            480  => '480p',
+            360  => '360p',
+            240  => '240p',
+            144  => '144p',
         ];
 
         foreach ($heights as $height) {
             $qualityName = $supportedQualities[$height] ?? "{$height}p";
 
-            // Prevent duplicates
             if (collect($compiled)->contains('quality', $qualityName)) {
                 continue;
             }
 
-            // Estimate total filesize for this height
             $bestVideoForHeightSize = 0;
             foreach ($formats as $f) {
                 if (($f['height'] ?? null) == $height && ($f['vcodec'] ?? 'none') !== 'none') {
@@ -212,32 +194,29 @@ class FetchVideoMetadata implements ShouldQueue
                 $estimatedSize = $this->formatBytes($totalBytes);
             }
 
-            // We download using: bestvideo[height<=HEIGHT]+bestaudio/best[height<=HEIGHT]
             $formatSelector = "bestvideo[height<={$height}]+bestaudio/best[height<={$height}]";
 
             $compiled[] = [
-                'id' => $formatSelector,
+                'id'      => $formatSelector,
                 'quality' => $qualityName,
-                'ext' => 'mp4',
-                'type' => 'video',
-                'size' => $estimatedSize ?? 'Unknown size',
+                'ext'     => 'mp4',
+                'type'    => 'video',
+                'size'    => $estimatedSize ?? 'Unknown size',
             ];
         }
 
-        // Add Audio MP3 Option
         $mp3Size = 'Unknown size';
         if ($bestAudioSize > 0) {
             $mp3Size = $this->formatBytes($bestAudioSize);
         }
         $compiled[] = [
-            'id' => 'bestaudio/best',
+            'id'      => 'bestaudio/best',
             'quality' => 'MP3 Audio (High Quality)',
-            'ext' => 'mp3',
-            'type' => 'audio',
-            'size' => $mp3Size,
+            'ext'     => 'mp3',
+            'type'    => 'audio',
+            'size'    => $mp3Size,
         ];
 
-        // Add Audio M4A Option
         $m4aSize = 'Unknown size';
         foreach ($formats as $f) {
             if (($f['vcodec'] ?? 'none') === 'none' && ($f['ext'] ?? '') === 'm4a') {
@@ -249,19 +228,16 @@ class FetchVideoMetadata implements ShouldQueue
             }
         }
         $compiled[] = [
-            'id' => 'bestaudio[ext=m4a]/best',
+            'id'      => 'bestaudio[ext=m4a]/best',
             'quality' => 'M4A Audio (Standard)',
-            'ext' => 'm4a',
-            'type' => 'audio',
-            'size' => $m4aSize !== 'Unknown size' ? $m4aSize : $mp3Size,
+            'ext'     => 'm4a',
+            'type'    => 'audio',
+            'size'    => $m4aSize !== 'Unknown size' ? $m4aSize : $mp3Size,
         ];
 
         return $compiled;
     }
 
-    /**
-     * Format bytes into a human readable string.
-     */
     protected function formatBytes(int $bytes, int $precision = 1): string
     {
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -272,16 +248,10 @@ class FetchVideoMetadata implements ShouldQueue
         return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
-    /**
-     * Detect available JavaScript runtimes and return a --js-runtimes value.
-     * On Cloud servers, node/deno may not be on the queue worker's PATH,
-     * so we check common locations and provide explicit paths.
-     */
     protected function detectJsRuntimes(): ?string
     {
         $runtimes = [];
 
-        // Common paths where Node.js might be installed
         $nodePaths = [
             '/usr/local/bin/node',
             '/usr/bin/node',
@@ -296,7 +266,6 @@ class FetchVideoMetadata implements ShouldQueue
             }
         }
 
-        // Try `which node` as a last resort
         if (empty($runtimes)) {
             $which = trim((string) shell_exec('which node 2>/dev/null'));
             if ($which && is_executable($which)) {
@@ -304,26 +273,14 @@ class FetchVideoMetadata implements ShouldQueue
             }
         }
 
-        // Check for Deno
-        $denoPaths = [
-            '/usr/local/bin/deno',
-            '/usr/bin/deno',
-        ];
-
-        foreach ($denoPaths as $path) {
+        foreach (['/usr/local/bin/deno', '/usr/bin/deno'] as $path) {
             if (is_file($path) && is_executable($path)) {
                 $runtimes[] = "deno:{$path}";
                 break;
             }
         }
 
-        // Check for Bun
-        $bunPaths = [
-            '/usr/local/bin/bun',
-            '/usr/bin/bun',
-        ];
-
-        foreach ($bunPaths as $path) {
+        foreach (['/usr/local/bin/bun', '/usr/bin/bun'] as $path) {
             if (is_file($path) && is_executable($path)) {
                 $runtimes[] = "bun:{$path}";
                 break;
@@ -331,9 +288,7 @@ class FetchVideoMetadata implements ShouldQueue
         }
 
         if (empty($runtimes)) {
-            Log::warning('No JavaScript runtime found for yt-dlp', [
-                'PATH' => getenv('PATH'),
-            ]);
+            Log::warning('No JavaScript runtime found for yt-dlp', ['PATH' => getenv('PATH')]);
             return null;
         }
 
@@ -342,9 +297,6 @@ class FetchVideoMetadata implements ShouldQueue
         return implode(',', $runtimes);
     }
 
-    /**
-     * Handle a job failure.
-     */
     public function failed(?\Throwable $exception): void
     {
         $videoDownload = VideoDownload::find($this->videoDownloadId);
