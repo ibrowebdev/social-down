@@ -1,5 +1,3 @@
-// FetchVideoMetadata.php
-
 <?php
 namespace App\Jobs;
 

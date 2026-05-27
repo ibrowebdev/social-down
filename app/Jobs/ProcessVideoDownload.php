@@ -1,5 +1,3 @@
-// ProcessVideoDownload.php
-
 <?php
 
 namespace App\Jobs;
