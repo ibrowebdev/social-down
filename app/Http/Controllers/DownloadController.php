@@ -5,11 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\VideoDownload;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
 {
-    public function serveFile(string $id): StreamedResponse
+    public function serveFile(string $id): BinaryFileResponse
     {
         $videoDownload = VideoDownload::findOrFail($id);
 
@@ -71,13 +71,10 @@ class DownloadController extends Controller
         $slug = \Illuminate\Support\Str::slug($videoDownload->title ?: 'video');
         $filename = ($slug ?: 'video') . '-' . substr($videoDownload->id, 0, 8) . '.' . $ext;
 
-        return response()->streamDownload(function () use ($disk, $fullPath) {
-            $stream = $disk->readStream($fullPath);
-            fpassthru($stream);
-            fclose($stream);
-        }, $filename, [
+        $absolutePath = storage_path('app/private/' . $fullPath);
+
+        return response()->download($absolutePath, $filename, [
             'Content-Type' => $contentType,
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
         ]);
     }
 }
